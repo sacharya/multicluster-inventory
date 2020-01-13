@@ -1,0 +1,7 @@
+apiVersion: app.ibm.com/v1alpha1
+kind: BareMetalAsset
+metadata:
+  name: example-baremetalasset
+spec:
+  # Add fields here
+  size: 3

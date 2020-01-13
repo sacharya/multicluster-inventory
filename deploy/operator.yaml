@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multicluster-inventory
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: multicluster-inventory
+  template:
+    metadata:
+      labels:
+        name: multicluster-inventory
+    spec:
+      serviceAccountName: multicluster-inventory
+      containers:
+        - name: multicluster-inventory
+          # Replace this with the built image name
+          image: REPLACE_IMAGE
+          command:
+          - multicluster-inventory
+          imagePullPolicy: Always
+          env:
+            - name: WATCH_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: OPERATOR_NAME
+              value: "multicluster-inventory"
