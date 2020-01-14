@@ -6,10 +6,11 @@ import (
 	appv1alpha1 "github.com/mhrivnak/multicluster-inventory/pkg/apis/app/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -18,11 +19,6 @@ import (
 )
 
 var log = logf.Log.WithName("controller_baremetalasset")
-
-/**
-* USER ACTION REQUIRED: This is a scaffold file intended for the user to modify with their own Controller
-* business logic.  Delete these comments after modifying this file.*
- */
 
 // Add creates a new BareMetalAsset Controller and adds it to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
@@ -49,9 +45,8 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 		return err
 	}
 
-	// TODO(user): Modify this to be the types you create that are owned by the primary resource
-	// Watch for changes to secondary resource Pods and requeue the owner BareMetalAsset
-	err = c.Watch(&source.Kind{Type: &corev1.Pod{}}, &handler.EnqueueRequestForOwner{
+	// Watch for changes to secondary resource Secrets and requeue the owner BareMetalAsset
+	err = c.Watch(&source.Kind{Type: &corev1.Secret{}}, &handler.EnqueueRequestForOwner{
 		IsController: true,
 		OwnerType:    &appv1alpha1.BareMetalAsset{},
 	})
@@ -75,9 +70,6 @@ type ReconcileBareMetalAsset struct {
 
 // Reconcile reads that state of the cluster for a BareMetalAsset object and makes changes based on the state read
 // and what is in the BareMetalAsset.Spec
-// TODO(user): Modify this Reconcile function to implement your Controller logic.  This example creates
-// a Pod as an example
-// Note:
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcile.Result, error) {
@@ -98,30 +90,35 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 		return reconcile.Result{}, err
 	}
 
+	// Check if the secret exists
+	secretName := instance.Spec.BMC.CredentialsName
+	secret := &corev1.Secret{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: request.Namespace}, secret)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			reqLogger.Error(err, "Secret not found", "Namespace", request.Namespace, "Secret.Name", secretName)
+			// TODO: Update the status to indicate the secret wasn't found.
+			return reconcile.Result{}, nil
+		}
+		return reconcile.Result{}, err
+	}
+
+	// Set BaremetalAsset instance as the owner and controller
+	if secret.OwnerReferences == nil || len(secret.OwnerReferences) == 0 {
+		if err := controllerutil.SetControllerReference(instance, secret, r.scheme); err != nil {
+			reqLogger.Error(err, "Failed to set ControllerReference")
+			return reconcile.Result{}, err
+		}
+		if err := r.client.Update(context.TODO(), secret); err != nil {
+			reqLogger.Error(err, "Failed to update secret with OwnerReferences")
+			return reconcile.Result{}, err
+		}
+		return reconcile.Result{Requeue: true}, nil
+	}
+
+	// TODO: Actually reconcile the asset
 	reqLogger.Info("Reconciled")
 
 	return reconcile.Result{}, nil
 }
 
-// newPodForCR returns a busybox pod with the same name/namespace as the cr
-func newPodForCR(cr *appv1alpha1.BareMetalAsset) *corev1.Pod {
-	labels := map[string]string{
-		"app": cr.Name,
-	}
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cr.Name + "-pod",
-			Namespace: cr.Namespace,
-			Labels:    labels,
-		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:    "busybox",
-					Image:   "busybox",
-					Command: []string{"sleep", "3600"},
-				},
-			},
-		},
-	}
-}
