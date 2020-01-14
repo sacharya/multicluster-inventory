@@ -30,6 +30,38 @@ spec:
           type: object
         spec:
           description: BareMetalAssetSpec defines the desired state of BareMetalAsset
+          properties:
+            bmc:
+              description: How do we connect to the BMC?
+              properties:
+                address:
+                  description: Address holds the URL for accessing the controller
+                    on the network.
+                  type: string
+                credentialsName:
+                  description: The name of the secret containing the BMC credentials
+                    (requires keys "username" and "password").
+                  type: string
+              required:
+              - address
+              - credentialsName
+              type: object
+            bootMACAddress:
+              description: Which MAC address will PXE boot? This is optional for some
+                types, but required for libvirt VMs driven by vbmc.
+              pattern: '[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}'
+              type: string
+            hardwareProfile:
+              description: What is the name of the hardware profile for this host?
+                It should only be necessary to set this when inspection cannot automatically
+                determine the profile.
+              type: string
+            role:
+              description: Role holds the role of the asset
+              enum:
+              - master
+              - worker
+              type: string
           type: object
         status:
           description: BareMetalAssetStatus defines the observed state of BareMetalAsset
