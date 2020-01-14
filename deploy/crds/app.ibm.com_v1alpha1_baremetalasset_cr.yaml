@@ -1,7 +1,22 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: worker-0-bmc-secret
+type: Opaque
+data:
+  username: YWRtaW4=
+  password: cGFzc3dvcmQ=
+
+---
 apiVersion: app.ibm.com/v1alpha1
 kind: BareMetalAsset
 metadata:
-  name: example-baremetalasset
+  name: baremetalasset-worker-0
 spec:
-  # Add fields here
-  size: 3
+  bmc:
+    address: ipmi://192.168.122.1:6233
+    credentialsName: worker-0-bmc-secret
+  bootMACAddress: "00:1B:44:11:3A:B7"
+  hardwareProfile: "hardwareProfile"
+  role: "worker"
