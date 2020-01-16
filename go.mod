@@ -3,6 +3,7 @@ module github.com/mhrivnak/multicluster-inventory
 go 1.13
 
 require (
+	github.com/openshift/custom-resource-status v0.0.0-20190822192428-e62f2f3b79f3
 	github.com/operator-framework/operator-sdk v0.14.0
 	github.com/spf13/pflag v1.0.5
 	k8s.io/api v0.0.0
