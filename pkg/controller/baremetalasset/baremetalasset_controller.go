@@ -121,4 +121,3 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 
 	return reconcile.Result{}, nil
 }
-
