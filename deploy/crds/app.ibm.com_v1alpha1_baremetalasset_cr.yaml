@@ -13,6 +13,8 @@ apiVersion: app.ibm.com/v1alpha1
 kind: BareMetalAsset
 metadata:
   name: baremetalasset-worker-0
+  labels:
+    cluster: cluster0
 spec:
   bmc:
     address: ipmi://192.168.122.1:6233
