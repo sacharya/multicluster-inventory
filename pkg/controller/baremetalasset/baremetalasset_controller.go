@@ -2,12 +2,16 @@ package baremetalasset
 
 import (
 	"context"
+	"fmt"
 
 	appv1alpha1 "github.com/mhrivnak/multicluster-inventory/pkg/apis/app/v1alpha1"
+	conditionsv1 "github.com/openshift/custom-resource-status/conditions/v1"
+	objectreferencesv1 "github.com/openshift/custom-resource-status/objectreferences/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/reference"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -97,9 +101,35 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 	if err != nil {
 		if errors.IsNotFound(err) {
 			reqLogger.Error(err, "Secret not found", "Namespace", request.Namespace, "Secret.Name", secretName)
-			// TODO: Update the status to indicate the secret wasn't found.
-			return reconcile.Result{}, nil
+			conditionsv1.SetStatusCondition(&instance.Status.Conditions, conditionsv1.Condition{
+				Type:    appv1alpha1.ConditionCredentialsFound,
+				Status:  corev1.ConditionFalse,
+				Reason:  "SecretNotFound",
+				Message: fmt.Sprintf("A secret with the name %v in namespace %v could not be found", secretName, request.Namespace),
+			})
+			return reconcile.Result{}, r.client.Status().Update(context.TODO(), instance)
 		}
+		return reconcile.Result{}, err
+	}
+
+	// Turn the secret into a reference we can use in status
+	secretRef, err := reference.GetReference(r.scheme, secret)
+	if err != nil {
+		reqLogger.Error(err, "Failed to get reference from secret")
+		return reconcile.Result{}, err
+	}
+
+	// Add the condition and relatedObject, but only update the status once
+	conditionsv1.SetStatusCondition(&instance.Status.Conditions, conditionsv1.Condition{
+		Type:    appv1alpha1.ConditionCredentialsFound,
+		Status:  corev1.ConditionTrue,
+		Reason:  "SecretFound",
+		Message: fmt.Sprintf("A secret with the name %v in namespace %v was found", secretName, request.Namespace),
+	})
+	objectreferencesv1.SetObjectReference(&instance.Status.RelatedObjects, *secretRef)
+	err = r.client.Status().Update(context.TODO(), instance)
+	if err != nil {
+		reqLogger.Error(err, "Failed to add secret to related objects")
 		return reconcile.Result{}, err
 	}
 
@@ -121,4 +151,3 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 
 	return reconcile.Result{}, nil
 }
-
