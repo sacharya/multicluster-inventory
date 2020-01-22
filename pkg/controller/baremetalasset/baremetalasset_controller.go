@@ -30,6 +30,11 @@ import (
 
 var log = logf.Log.WithName("controller_baremetalasset")
 
+const (
+	roleKey    = "metal.io/role"
+	clusterKey = "metal.io/cluster"
+)
+
 // Add creates a new BareMetalAsset Controller and adds it to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
 func Add(mgr manager.Manager) error {
@@ -152,8 +157,21 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 		return reconcile.Result{Requeue: true}, nil
 	}
 
-	// If clusterName is specified, ensure syncset is created
 	if instance.Spec.ClusterName != "" {
+		// If clusterName is specified in the spec, also create a cluster label
+		if instance.Labels["cluster"] == "" || instance.Labels["cluster"] != instance.Spec.ClusterName {
+			labels := instance.ObjectMeta.Labels
+			if labels == nil {
+				labels = map[string]string{}
+			}
+			labels["cluster"] = instance.Spec.ClusterName
+			instance.SetLabels(labels)
+			if err := r.client.Update(context.TODO(), instance); err != nil {
+				reqLogger.Error(err, "Failed to update instance with cluster label")
+				return reconcile.Result{}, err
+			}
+		}
+		// If clusterName is specified, ensure syncset is created
 		err = r.ensureHiveSyncSet(instance, reqLogger)
 		if err != nil {
 			return reconcile.Result{}, err
@@ -199,19 +217,6 @@ func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *appv1alpha1.BareMetalAs
 }
 
 func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *appv1alpha1.BareMetalAsset, reqLogger logr.Logger) *hivev1.SyncSet {
-	secretReferences := []hivev1.SecretReference{}
-	secretReference := hivev1.SecretReference{
-		Source: corev1.ObjectReference{
-			Name:      bma.Spec.BMC.CredentialsName,
-			Namespace: bma.Namespace,
-		},
-		Target: corev1.ObjectReference{
-			Name:      bma.Spec.BMC.CredentialsName,
-			Namespace: bma.Namespace,
-		},
-	}
-	secretReferences = append(secretReferences, secretReference)
-
 	bmhResource, err := json.Marshal(r.newBareMetalHost(bma, reqLogger))
 	if err != nil {
 		reqLogger.Error(err, "Error marshaling baremetalhost")
@@ -227,7 +232,7 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *appv1alpha1.BareMetalAsset
 			Name:      bma.Name,
 			Namespace: bma.Namespace,
 			Labels: map[string]string{
-				"cluster": bma.Spec.ClusterName,
+				clusterKey: bma.Spec.ClusterName,
 			},
 		},
 		Spec: hivev1.SyncSetSpec{
@@ -239,7 +244,18 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *appv1alpha1.BareMetalAsset
 				},
 				Patches:           []hivev1.SyncObjectPatch{},
 				ResourceApplyMode: hivev1.UpsertResourceApplyMode,
-				SecretReferences:  secretReferences,
+				SecretReferences: []hivev1.SecretReference{
+					hivev1.SecretReference{
+						Source: corev1.ObjectReference{
+							Name:      bma.Spec.BMC.CredentialsName,
+							Namespace: bma.Namespace,
+						},
+						Target: corev1.ObjectReference{
+							Name:      bma.Spec.BMC.CredentialsName,
+							Namespace: bma.Namespace,
+						},
+					},
+				},
 			},
 			ClusterDeploymentRefs: []corev1.LocalObjectReference{
 				{
@@ -260,8 +276,8 @@ func (r *ReconcileBareMetalAsset) newBareMetalHost(bma *appv1alpha1.BareMetalAss
 		ObjectMeta: metav1.ObjectMeta{
 			Name: bma.Name,
 			Labels: map[string]string{
-				"role":    fmt.Sprintf("%v", bma.Spec.Role),
-				"cluster": bma.Spec.ClusterName,
+				roleKey:    fmt.Sprintf("%v", bma.Spec.Role),
+				clusterKey: bma.Spec.ClusterName,
 			},
 		},
 		Spec: metal3v1alpha1.BareMetalHostSpec{
