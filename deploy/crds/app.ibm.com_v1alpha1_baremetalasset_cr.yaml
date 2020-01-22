@@ -22,3 +22,4 @@ spec:
   bootMACAddress: "00:1B:44:11:3A:B7"
   hardwareProfile: "hardwareProfile"
   role: "worker"
+  clusterName: "cluster0"

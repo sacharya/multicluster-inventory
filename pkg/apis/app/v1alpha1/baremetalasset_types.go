@@ -55,6 +55,9 @@ type BareMetalAssetSpec struct {
 	// Role holds the role of the asset
 	// +kubebuilder:validation:Enum=master;worker
 	Role Role `json:"role,omitempty"`
+
+	// The name of the cluster which the host belongs to.
+	ClusterName string `json:"clusterName,omitempty"`
 }
 
 // BareMetalAssetStatus defines the observed state of BareMetalAsset

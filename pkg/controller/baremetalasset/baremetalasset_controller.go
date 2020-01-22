@@ -152,9 +152,12 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 		return reconcile.Result{Requeue: true}, nil
 	}
 
-	err = r.ensureHiveSyncSet(instance, reqLogger)
-	if err != nil {
-		return reconcile.Result{}, err
+	// If clusterName is specified, ensure syncset is created
+	if instance.Spec.ClusterName != "" {
+		err = r.ensureHiveSyncSet(instance, reqLogger)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
 	}
 
 	reqLogger.Info("Reconciled")
@@ -224,7 +227,7 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *appv1alpha1.BareMetalAsset
 			Name:      bma.Name,
 			Namespace: bma.Namespace,
 			Labels: map[string]string{
-				"cluster": bma.Labels["cluster"],
+				"cluster": bma.Spec.ClusterName,
 			},
 		},
 		Spec: hivev1.SyncSetSpec{
@@ -240,7 +243,7 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *appv1alpha1.BareMetalAsset
 			},
 			ClusterDeploymentRefs: []corev1.LocalObjectReference{
 				{
-					Name: bma.Labels["cluster"],
+					Name: bma.Spec.ClusterName,
 				},
 			},
 		},
@@ -257,7 +260,8 @@ func (r *ReconcileBareMetalAsset) newBareMetalHost(bma *appv1alpha1.BareMetalAss
 		ObjectMeta: metav1.ObjectMeta{
 			Name: bma.Name,
 			Labels: map[string]string{
-				"role": fmt.Sprintf("%v", bma.Spec.Role),
+				"role":    fmt.Sprintf("%v", bma.Spec.Role),
+				"cluster": bma.Spec.ClusterName,
 			},
 		},
 		Spec: metal3v1alpha1.BareMetalHostSpec{
