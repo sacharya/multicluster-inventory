@@ -31,8 +31,10 @@ import (
 var log = logf.Log.WithName("controller_baremetalasset")
 
 const (
-	roleKey    = "metal.io/role"
-	clusterKey = "metal.io/cluster"
+	// RoleKey is the key name for the role label associated with the asset
+	RoleKey    = "metal.io/role"
+	// ClusterKey is the key name for the cluster label associated with the asset
+	ClusterKey = "metal.io/cluster"
 )
 
 // Add creates a new BareMetalAsset Controller and adds it to the Manager. The Manager will set fields on the Controller
@@ -159,15 +161,16 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 
 	if instance.Spec.ClusterName != "" {
 		// If clusterName is specified in the spec, also create a cluster label
-		if instance.Labels["cluster"] == "" || instance.Labels["cluster"] != instance.Spec.ClusterName {
+		if instance.Labels[ClusterKey] != instance.Spec.ClusterName {
 			labels := instance.ObjectMeta.Labels
 			if labels == nil {
 				labels = map[string]string{}
 			}
-			labels["cluster"] = instance.Spec.ClusterName
+			labels[ClusterKey] = instance.Spec.ClusterName
+			labels[RoleKey] = fmt.Sprintf("%v", instance.Spec.Role)
 			instance.SetLabels(labels)
 			if err := r.client.Update(context.TODO(), instance); err != nil {
-				reqLogger.Error(err, "Failed to update instance with cluster label")
+				reqLogger.Error(err, "Failed to update instance with cluster and role labels")
 				return reconcile.Result{}, err
 			}
 		}
@@ -232,7 +235,7 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *appv1alpha1.BareMetalAsset
 			Name:      bma.Name,
 			Namespace: bma.Namespace,
 			Labels: map[string]string{
-				clusterKey: bma.Spec.ClusterName,
+				ClusterKey: bma.Spec.ClusterName,
 			},
 		},
 		Spec: hivev1.SyncSetSpec{
@@ -276,8 +279,8 @@ func (r *ReconcileBareMetalAsset) newBareMetalHost(bma *appv1alpha1.BareMetalAss
 		ObjectMeta: metav1.ObjectMeta{
 			Name: bma.Name,
 			Labels: map[string]string{
-				roleKey:    fmt.Sprintf("%v", bma.Spec.Role),
-				clusterKey: bma.Spec.ClusterName,
+				RoleKey:    fmt.Sprintf("%v", bma.Spec.Role),
+				ClusterKey: bma.Spec.ClusterName,
 			},
 		},
 		Spec: metal3v1alpha1.BareMetalHostSpec{
