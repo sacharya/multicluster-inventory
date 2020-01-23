@@ -32,7 +32,7 @@ var log = logf.Log.WithName("controller_baremetalasset")
 
 const (
 	// RoleKey is the key name for the role label associated with the asset
-	RoleKey    = "metal.io/role"
+	RoleKey = "metal.io/role"
 	// ClusterKey is the key name for the cluster label associated with the asset
 	ClusterKey = "metal.io/cluster"
 )
@@ -64,6 +64,15 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 
 	// Watch for changes to secondary resource Secrets and requeue the owner BareMetalAsset
 	err = c.Watch(&source.Kind{Type: &corev1.Secret{}}, &handler.EnqueueRequestForOwner{
+		IsController: true,
+		OwnerType:    &appv1alpha1.BareMetalAsset{},
+	})
+	if err != nil {
+		return err
+	}
+
+	// Watch for changes to secondary resource SyncSets and requeue the owner BareMetalAsset
+	err = c.Watch(&source.Kind{Type: &hivev1.SyncSet{}}, &handler.EnqueueRequestForOwner{
 		IsController: true,
 		OwnerType:    &appv1alpha1.BareMetalAsset{},
 	})
@@ -226,6 +235,9 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *appv1alpha1.BareMetalAsset
 		return nil
 	}
 
+	blockOwnerDeletion := true
+	isController := true
+
 	hsc := &hivev1.SyncSet{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "SyncSet",
@@ -236,6 +248,16 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *appv1alpha1.BareMetalAsset
 			Namespace: bma.Namespace,
 			Labels: map[string]string{
 				ClusterKey: bma.Spec.ClusterName,
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				metav1.OwnerReference{
+					UID:                bma.UID,
+					APIVersion:         bma.APIVersion,
+					Kind:               bma.Kind,
+					Name:               bma.Name,
+					BlockOwnerDeletion: &blockOwnerDeletion,
+					Controller:         &isController,
+				},
 			},
 		},
 		Spec: hivev1.SyncSetSpec{
