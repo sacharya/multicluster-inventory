@@ -32,9 +32,9 @@ var log = logf.Log.WithName("controller_baremetalasset")
 
 const (
 	// RoleKey is the key name for the role label associated with the asset
-	RoleKey = "metal.io/role"
+	RoleKey = "metal3.io/role"
 	// ClusterKey is the key name for the cluster label associated with the asset
-	ClusterKey = "metal.io/cluster"
+	ClusterKey = "metal3.io/cluster"
 )
 
 // Add creates a new BareMetalAsset Controller and adds it to the Manager. The Manager will set fields on the Controller
