@@ -2,13 +2,19 @@ package baremetalasset
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 
+	"github.com/go-logr/logr"
+	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/pkg/apis/metal3/v1alpha1"
 	appv1alpha1 "github.com/mhrivnak/multicluster-inventory/pkg/apis/app/v1alpha1"
 	conditionsv1 "github.com/openshift/custom-resource-status/conditions/v1"
 	objectreferencesv1 "github.com/openshift/custom-resource-status/objectreferences/v1"
+	hivev1 "github.com/openshift/hive/pkg/apis/hive/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/reference"
@@ -23,6 +29,13 @@ import (
 )
 
 var log = logf.Log.WithName("controller_baremetalasset")
+
+const (
+	// RoleKey is the key name for the role label associated with the asset
+	RoleKey = "metal3.io/role"
+	// ClusterKey is the key name for the cluster label associated with the asset
+	ClusterKey = "metal3.io/cluster"
+)
 
 // Add creates a new BareMetalAsset Controller and adds it to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
@@ -51,6 +64,15 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 
 	// Watch for changes to secondary resource Secrets and requeue the owner BareMetalAsset
 	err = c.Watch(&source.Kind{Type: &corev1.Secret{}}, &handler.EnqueueRequestForOwner{
+		IsController: true,
+		OwnerType:    &appv1alpha1.BareMetalAsset{},
+	})
+	if err != nil {
+		return err
+	}
+
+	// Watch for changes to secondary resource SyncSets and requeue the owner BareMetalAsset
+	err = c.Watch(&source.Kind{Type: &hivev1.SyncSet{}}, &handler.EnqueueRequestForOwner{
 		IsController: true,
 		OwnerType:    &appv1alpha1.BareMetalAsset{},
 	})
@@ -146,8 +168,151 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 		return reconcile.Result{Requeue: true}, nil
 	}
 
-	// TODO: Actually reconcile the asset
+	if instance.Spec.ClusterName != "" {
+		// If clusterName is specified in the spec, also create a cluster label
+		if instance.Labels[ClusterKey] != instance.Spec.ClusterName {
+			labels := instance.ObjectMeta.Labels
+			if labels == nil {
+				labels = map[string]string{}
+			}
+			labels[ClusterKey] = instance.Spec.ClusterName
+			labels[RoleKey] = fmt.Sprintf("%v", instance.Spec.Role)
+			instance.SetLabels(labels)
+			if err := r.client.Update(context.TODO(), instance); err != nil {
+				reqLogger.Error(err, "Failed to update instance with cluster and role labels")
+				return reconcile.Result{}, err
+			}
+		}
+		// If clusterName is specified, ensure syncset is created
+		err = r.ensureHiveSyncSet(instance, reqLogger)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+	}
+
 	reqLogger.Info("Reconciled")
 
 	return reconcile.Result{}, nil
+}
+
+func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *appv1alpha1.BareMetalAsset, reqLogger logr.Logger) error {
+	hsc := r.newHiveSyncSet(bma, reqLogger)
+
+	found := &hivev1.SyncSet{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: hsc.Name, Namespace: bma.Namespace}, found)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			err := r.client.Create(context.TODO(), hsc)
+			if err != nil {
+				reqLogger.Error(err, "Failed to create Hive SyncSet")
+				return err
+			}
+		} else {
+			// other error. fail reconcile
+			reqLogger.Error(err, "Failed to get Hive SyncSet")
+			return err
+		}
+	} else {
+		// Update Hive SyncSet CR if it is not in the desired state
+		if !reflect.DeepEqual(hsc.Spec, found.Spec) {
+			reqLogger.Info("Updating spec for Hive SyncSet")
+			found.Spec = hsc.Spec
+			err := r.client.Update(context.TODO(), found)
+			if err != nil {
+				reqLogger.Error(err, "Failed to update Hive SyncSet")
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *appv1alpha1.BareMetalAsset, reqLogger logr.Logger) *hivev1.SyncSet {
+	bmhResource, err := json.Marshal(r.newBareMetalHost(bma, reqLogger))
+	if err != nil {
+		reqLogger.Error(err, "Error marshaling baremetalhost")
+		return nil
+	}
+
+	blockOwnerDeletion := true
+	isController := true
+
+	hsc := &hivev1.SyncSet{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "SyncSet",
+			APIVersion: "hive.openshift.io/v1alpha1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      bma.Name,
+			Namespace: bma.Namespace,
+			Labels: map[string]string{
+				ClusterKey: bma.Spec.ClusterName,
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				metav1.OwnerReference{
+					UID:                bma.UID,
+					APIVersion:         bma.APIVersion,
+					Kind:               bma.Kind,
+					Name:               bma.Name,
+					BlockOwnerDeletion: &blockOwnerDeletion,
+					Controller:         &isController,
+				},
+			},
+		},
+		Spec: hivev1.SyncSetSpec{
+			SyncSetCommonSpec: hivev1.SyncSetCommonSpec{
+				Resources: []runtime.RawExtension{
+					{
+						Raw: bmhResource,
+					},
+				},
+				Patches:           []hivev1.SyncObjectPatch{},
+				ResourceApplyMode: hivev1.UpsertResourceApplyMode,
+				SecretReferences: []hivev1.SecretReference{
+					hivev1.SecretReference{
+						Source: corev1.ObjectReference{
+							Name:      bma.Spec.BMC.CredentialsName,
+							Namespace: bma.Namespace,
+						},
+						Target: corev1.ObjectReference{
+							Name:      bma.Spec.BMC.CredentialsName,
+							Namespace: bma.Namespace,
+						},
+					},
+				},
+			},
+			ClusterDeploymentRefs: []corev1.LocalObjectReference{
+				{
+					Name: bma.Spec.ClusterName,
+				},
+			},
+		},
+	}
+	return hsc
+}
+
+func (r *ReconcileBareMetalAsset) newBareMetalHost(bma *appv1alpha1.BareMetalAsset, reqLogger logr.Logger) *metal3v1alpha1.BareMetalHost {
+	bmh := &metal3v1alpha1.BareMetalHost{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "BareMetalHost",
+			APIVersion: "metal3.io/v1alpha1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: bma.Name,
+			Labels: map[string]string{
+				RoleKey:    fmt.Sprintf("%v", bma.Spec.Role),
+				ClusterKey: bma.Spec.ClusterName,
+			},
+		},
+		Spec: metal3v1alpha1.BareMetalHostSpec{
+			BMC: metal3v1alpha1.BMCDetails{
+				Address:         bma.Spec.BMC.Address,
+				CredentialsName: bma.Spec.BMC.CredentialsName,
+			},
+			HardwareProfile: bma.Spec.HardwareProfile,
+			BootMACAddress:  bma.Spec.BootMACAddress,
+		},
+	}
+	return bmh
 }

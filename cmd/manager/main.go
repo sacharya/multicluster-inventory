@@ -16,6 +16,7 @@ import (
 	"github.com/mhrivnak/multicluster-inventory/pkg/controller"
 	"github.com/mhrivnak/multicluster-inventory/version"
 
+	hivev1 "github.com/openshift/hive/pkg/apis/hive/v1"
 	"github.com/operator-framework/operator-sdk/pkg/k8sutil"
 	kubemetrics "github.com/operator-framework/operator-sdk/pkg/kube-metrics"
 	"github.com/operator-framework/operator-sdk/pkg/leader"
@@ -105,6 +106,11 @@ func main() {
 	// Setup Scheme for all resources
 	if err := apis.AddToScheme(mgr.GetScheme()); err != nil {
 		log.Error(err, "")
+		os.Exit(1)
+	}
+
+	if err := hivev1.AddToScheme(mgr.GetScheme()); err != nil {
+		log.Error(err, "Failed adding hivev1 to scheme")
 		os.Exit(1)
 	}
 
