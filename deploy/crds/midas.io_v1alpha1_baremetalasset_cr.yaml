@@ -9,7 +9,7 @@ data:
   password: cGFzc3dvcmQ=
 
 ---
-apiVersion: app.ibm.com/v1alpha1
+apiVersion: midas.io/v1alpha1
 kind: BareMetalAsset
 metadata:
   name: baremetalasset-worker-0

@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-logr/logr"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/pkg/apis/metal3/v1alpha1"
-	appv1alpha1 "github.com/mhrivnak/multicluster-inventory/pkg/apis/app/v1alpha1"
+	midasv1alpha1 "github.com/mhrivnak/multicluster-inventory/pkg/apis/midas/v1alpha1"
 	conditionsv1 "github.com/openshift/custom-resource-status/conditions/v1"
 	objectreferencesv1 "github.com/openshift/custom-resource-status/objectreferences/v1"
 	hivev1 "github.com/openshift/hive/pkg/apis/hive/v1"
@@ -57,7 +57,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	}
 
 	// Watch for changes to primary resource BareMetalAsset
-	err = c.Watch(&source.Kind{Type: &appv1alpha1.BareMetalAsset{}}, &handler.EnqueueRequestForObject{})
+	err = c.Watch(&source.Kind{Type: &midasv1alpha1.BareMetalAsset{}}, &handler.EnqueueRequestForObject{})
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	// Watch for changes to secondary resource Secrets and requeue the owner BareMetalAsset
 	err = c.Watch(&source.Kind{Type: &corev1.Secret{}}, &handler.EnqueueRequestForOwner{
 		IsController: true,
-		OwnerType:    &appv1alpha1.BareMetalAsset{},
+		OwnerType:    &midasv1alpha1.BareMetalAsset{},
 	})
 	if err != nil {
 		return err
@@ -74,7 +74,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	// Watch for changes to secondary resource SyncSets and requeue the owner BareMetalAsset
 	err = c.Watch(&source.Kind{Type: &hivev1.SyncSet{}}, &handler.EnqueueRequestForOwner{
 		IsController: true,
-		OwnerType:    &appv1alpha1.BareMetalAsset{},
+		OwnerType:    &midasv1alpha1.BareMetalAsset{},
 	})
 	if err != nil {
 		return err
@@ -103,7 +103,7 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 	reqLogger.Info("Reconciling BareMetalAsset")
 
 	// Fetch the BareMetalAsset instance
-	instance := &appv1alpha1.BareMetalAsset{}
+	instance := &midasv1alpha1.BareMetalAsset{}
 	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -124,7 +124,7 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 		if errors.IsNotFound(err) {
 			reqLogger.Error(err, "Secret not found", "Namespace", request.Namespace, "Secret.Name", secretName)
 			conditionsv1.SetStatusCondition(&instance.Status.Conditions, conditionsv1.Condition{
-				Type:    appv1alpha1.ConditionCredentialsFound,
+				Type:    midasv1alpha1.ConditionCredentialsFound,
 				Status:  corev1.ConditionFalse,
 				Reason:  "SecretNotFound",
 				Message: fmt.Sprintf("A secret with the name %v in namespace %v could not be found", secretName, request.Namespace),
@@ -143,7 +143,7 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 
 	// Add the condition and relatedObject, but only update the status once
 	conditionsv1.SetStatusCondition(&instance.Status.Conditions, conditionsv1.Condition{
-		Type:    appv1alpha1.ConditionCredentialsFound,
+		Type:    midasv1alpha1.ConditionCredentialsFound,
 		Status:  corev1.ConditionTrue,
 		Reason:  "SecretFound",
 		Message: fmt.Sprintf("A secret with the name %v in namespace %v was found", secretName, request.Namespace),
@@ -195,7 +195,7 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 	return reconcile.Result{}, nil
 }
 
-func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *appv1alpha1.BareMetalAsset, reqLogger logr.Logger) error {
+func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetalAsset, reqLogger logr.Logger) error {
 	hsc := r.newHiveSyncSet(bma, reqLogger)
 
 	found := &hivev1.SyncSet{}
@@ -228,7 +228,7 @@ func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *appv1alpha1.BareMetalAs
 	return nil
 }
 
-func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *appv1alpha1.BareMetalAsset, reqLogger logr.Logger) *hivev1.SyncSet {
+func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *midasv1alpha1.BareMetalAsset, reqLogger logr.Logger) *hivev1.SyncSet {
 	bmhResource, err := json.Marshal(r.newBareMetalHost(bma, reqLogger))
 	if err != nil {
 		reqLogger.Error(err, "Error marshaling baremetalhost")
@@ -292,7 +292,7 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *appv1alpha1.BareMetalAsset
 	return hsc
 }
 
-func (r *ReconcileBareMetalAsset) newBareMetalHost(bma *appv1alpha1.BareMetalAsset, reqLogger logr.Logger) *metal3v1alpha1.BareMetalHost {
+func (r *ReconcileBareMetalAsset) newBareMetalHost(bma *midasv1alpha1.BareMetalAsset, reqLogger logr.Logger) *metal3v1alpha1.BareMetalHost {
 	bmh := &metal3v1alpha1.BareMetalHost{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "BareMetalHost",
