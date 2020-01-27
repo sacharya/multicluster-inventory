@@ -1,3 +1,12 @@
+IMAGE_REGISTRY ?= "quay.io"
+REGISTRY_NAMESPACE ?= "mcmdev"
+IMAGE_TAG ?= "latest"
+
+# Use podman if available, otherwise use docker
+ifeq ($(IMAGE_BUILD_CMD),)
+	IMAGE_BUILD_CMD = $(shell podman version > /dev/null && echo podman || echo docker)
+endif
+
 sanity: ## Check the sanity of the project
 	go mod tidy
 	go vet ./...
@@ -19,4 +28,7 @@ help: ## Show this help screen
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 
-.PHONY: sanity build test help
+build-image: build ## Build the operator image
+	$(IMAGE_BUILD_CMD) build -f build/Dockerfile -t $(IMAGE_REGISTRY)/$(REGISTRY_NAMESPACE)/multicluster-inventory:$(IMAGE_TAG) .
+
+.PHONY: sanity build build-image test help
