@@ -77,7 +77,7 @@ rules:
   verbs:
   - get
 - apiGroups:
-  - app.ibm.com
+  - midas.io
   resources:
   - '*'
   verbs:
