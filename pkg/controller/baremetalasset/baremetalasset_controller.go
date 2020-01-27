@@ -171,13 +171,7 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 	if instance.Spec.ClusterName != "" {
 		// If clusterName is specified in the spec, also create a cluster label
 		if instance.Labels[ClusterKey] != instance.Spec.ClusterName {
-			labels := instance.ObjectMeta.Labels
-			if labels == nil {
-				labels = map[string]string{}
-			}
-			labels[ClusterKey] = instance.Spec.ClusterName
-			labels[RoleKey] = fmt.Sprintf("%v", instance.Spec.Role)
-			instance.SetLabels(labels)
+			instance.SetLabels(updateLabels(instance))
 			if err := r.client.Update(context.TODO(), instance); err != nil {
 				reqLogger.Error(err, "Failed to update instance with cluster and role labels")
 				return reconcile.Result{}, err
@@ -187,6 +181,32 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 		err = r.ensureHiveSyncSet(instance, reqLogger)
 		if err != nil {
 			return reconcile.Result{}, err
+		}
+	} else {
+		// If clusterName is not in the spec anymore, remove the cluster label
+		if instance.Labels[ClusterKey] != "" {
+			instance.SetLabels(deleteLabels(instance))
+			if err := r.client.Update(context.TODO(), instance); err != nil {
+				reqLogger.Error(err, "Failed to remove cluster and role labels from instance")
+				return reconcile.Result{}, err
+			}
+		}
+		// Also delete the syncset if it exists
+		found := &hivev1.SyncSet{}
+		err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, found)
+		if err != nil {
+			if !errors.IsNotFound(err) {
+				reqLogger.Error(err, "Failed to get Hive SyncSet")
+				return reconcile.Result{}, err
+			}
+		} else {
+			err = r.client.Delete(context.TODO(), found)
+			if err != nil {
+				if !errors.IsNotFound(err) {
+					reqLogger.Error(err, "Failed to delete Hive SyncSet")
+					return reconcile.Result{}, err
+				}
+			}
 		}
 	}
 
@@ -231,6 +251,15 @@ func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetal
 			return err
 		}
 	} else {
+		// Update Hive SyncSet label if it is not in desired state
+		if found.Labels[ClusterKey] != bma.Spec.ClusterName {
+			found.SetLabels(updateLabels(bma))
+			if err := r.client.Update(context.TODO(), found); err != nil {
+				reqLogger.Error(err, "Failed to update Hive SyncSet with new cluster label")
+				return err
+			}
+		}
+
 		// Update Hive SyncSet CR if it is not in the desired state
 		if !reflect.DeepEqual(hsc.Spec, found.Spec) {
 			reqLogger.Info("Updating spec for Hive SyncSet")
@@ -278,9 +307,7 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *midasv1alpha1.BareMetalAss
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      bma.Name,
 			Namespace: bma.Namespace,
-			Labels: map[string]string{
-				ClusterKey: bma.Spec.ClusterName,
-			},
+			Labels:    updateLabels(bma),
 			OwnerReferences: []metav1.OwnerReference{
 				metav1.OwnerReference{
 					UID:                bma.UID,
@@ -331,7 +358,8 @@ func (r *ReconcileBareMetalAsset) newBareMetalHost(bma *midasv1alpha1.BareMetalA
 			APIVersion: "metal3.io/v1alpha1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name: bma.Name,
+			Name:      bma.Name,
+			Namespace: bma.Namespace,
 			Labels: map[string]string{
 				RoleKey:    fmt.Sprintf("%v", bma.Spec.Role),
 				ClusterKey: bma.Spec.ClusterName,
@@ -347,4 +375,25 @@ func (r *ReconcileBareMetalAsset) newBareMetalHost(bma *midasv1alpha1.BareMetalA
 		},
 	}
 	return bmh
+}
+
+func updateLabels(bma *midasv1alpha1.BareMetalAsset) map[string]string {
+	labels := bma.ObjectMeta.Labels
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[ClusterKey] = bma.Spec.ClusterName
+	labels[RoleKey] = fmt.Sprintf("%v", bma.Spec.Role)
+	return labels
+}
+
+func deleteLabels(bma *midasv1alpha1.BareMetalAsset) map[string]string {
+	labels := bma.ObjectMeta.Labels
+	if labels == nil {
+		labels = map[string]string{}
+	} else {
+		delete(labels, ClusterKey)
+		delete(labels, RoleKey)
+	}
+	return labels
 }
