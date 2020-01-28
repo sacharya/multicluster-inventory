@@ -30,11 +30,11 @@ Deploy the operator:
 kubectl create -f deploy/service_account.yaml
 kubectl create -f deploy/role.yaml
 kubectl create -f deploy/role_binding.yaml
-kubectl create -f deploy/crds/app.ibm.com_baremetalassets_crd.yaml
+kubectl create -f deploy/crds/midas.io_baremetalassets_crd.yaml
 kubectl create -f deploy/operator.yaml
 ```
 
 Once you have the operator running, you can create an inventory record ie. BareMetalAsset using:
 ```
-kubectl create -f deploy/crds/app.ibm.com_v1alpha1_baremetalasset_cr.yaml
+kubectl create -f deploy/crds/midas.io_v1alpha1_baremetalasset_cr.yaml
 ```
