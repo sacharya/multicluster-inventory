@@ -206,7 +206,7 @@ func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetal
 			if err != nil {
 				reqLogger.Error(err, "Failed to create Hive SyncSet")
 				conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
-					Type:    midasv1alpha1.ConditionSyncSetCreated,
+					Type:    midasv1alpha1.ConditionAssetSyncStarted,
 					Status:  corev1.ConditionFalse,
 					Reason:  "SyncSetCreationFailed",
 					Message: "Failed to create SyncSet",
@@ -220,7 +220,7 @@ func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetal
 			}
 
 			conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
-				Type:    midasv1alpha1.ConditionSyncSetCreated,
+				Type:    midasv1alpha1.ConditionAssetSyncStarted,
 				Status:  corev1.ConditionTrue,
 				Reason:  "SyncSetCreated",
 				Message: "SyncSet created successfully",
@@ -241,7 +241,7 @@ func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetal
 				return err
 			}
 			conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
-				Type:    midasv1alpha1.ConditionSyncSetCreated,
+				Type:    midasv1alpha1.ConditionAssetSyncStarted,
 				Status:  corev1.ConditionTrue,
 				Reason:  "SyncSetUpdated",
 				Message: "SyncSet updated successfully",

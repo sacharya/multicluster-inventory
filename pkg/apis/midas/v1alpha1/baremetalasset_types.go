@@ -81,11 +81,10 @@ const (
 	// of a BareMetalAsset have been found.
 	ConditionCredentialsFound conditionsv1.ConditionType = "CredentialsFound"
 
-	// ConditionSyncSetCreated reports whether the SyncSet for a given
-	// BareMetalAsset has been created.
-	ConditionSyncSetCreated conditionsv1.ConditionType = "SyncSetCreated"
+	// ConditionAssetSyncStarted reports whether syncronization of a BareMetalHost
+	// to a managed cluster has started
+	ConditionAssetSyncStarted conditionsv1.ConditionType = "AssetSyncStarted"
 )
-
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
