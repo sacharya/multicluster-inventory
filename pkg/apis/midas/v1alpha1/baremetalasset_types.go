@@ -75,9 +75,17 @@ type BareMetalAssetStatus struct {
 	RelatedObjects []corev1.ObjectReference `json:"relatedObjects,omitempty"`
 }
 
-// ConditionCredentialsFound reports whether the secret containing the credentials
-// of a BareMetalAsset have been found.
-const ConditionCredentialsFound conditionsv1.ConditionType = "CredentialsFound"
+// Condition Types
+const (
+	// ConditionCredentialsFound reports whether the secret containing the credentials
+	// of a BareMetalAsset have been found.
+	ConditionCredentialsFound conditionsv1.ConditionType = "CredentialsFound"
+
+	// ConditionSyncSetCreated reports whether the SyncSet for a given
+	// BareMetalAsset has been created.
+	ConditionSyncSetCreated conditionsv1.ConditionType = "SyncSetCreated"
+)
+
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
