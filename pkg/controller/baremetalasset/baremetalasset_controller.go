@@ -199,14 +199,32 @@ func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetal
 	hsc := r.newHiveSyncSet(bma, reqLogger)
 
 	found := &hivev1.SyncSet{}
-	err := r.client.Get(context.TODO(), types.NamespacedName{Name: hsc.Name, Namespace: bma.Namespace}, found)
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: hsc.Name, Namespace: hsc.Namespace}, found)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			err := r.client.Create(context.TODO(), hsc)
 			if err != nil {
 				reqLogger.Error(err, "Failed to create Hive SyncSet")
+				conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
+					Type:    midasv1alpha1.ConditionAssetSyncStarted,
+					Status:  corev1.ConditionFalse,
+					Reason:  "SyncSetCreationFailed",
+					Message: "Failed to create SyncSet",
+				})
+				// do not overwrite err
+				serr := r.client.Status().Update(context.TODO(), bma)
+				if serr != nil {
+					reqLogger.Error(serr, "Failed to update SyncSetCreated condition")
+				}
 				return err
 			}
+
+			conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
+				Type:    midasv1alpha1.ConditionAssetSyncStarted,
+				Status:  corev1.ConditionTrue,
+				Reason:  "SyncSetCreated",
+				Message: "SyncSet created successfully",
+			})
 		} else {
 			// other error. fail reconcile
 			reqLogger.Error(err, "Failed to get Hive SyncSet")
@@ -222,10 +240,24 @@ func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetal
 				reqLogger.Error(err, "Failed to update Hive SyncSet")
 				return err
 			}
+			conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
+				Type:    midasv1alpha1.ConditionAssetSyncStarted,
+				Status:  corev1.ConditionTrue,
+				Reason:  "SyncSetUpdated",
+				Message: "SyncSet updated successfully",
+			})
 		}
 	}
 
-	return nil
+	// Add SyncSet to related objects
+	hscRef, err := reference.GetReference(r.scheme, hsc)
+	if err != nil {
+		reqLogger.Error(err, "Failed to get reference from SyncSet")
+		return err
+	}
+	objectreferencesv1.SetObjectReference(&bma.Status.RelatedObjects, *hscRef)
+
+	return r.client.Status().Update(context.TODO(), bma)
 }
 
 func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *midasv1alpha1.BareMetalAsset, reqLogger logr.Logger) *hivev1.SyncSet {
