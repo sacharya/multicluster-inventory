@@ -301,13 +301,13 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *midasv1alpha1.BareMetalAss
 				},
 				Patches:           []hivev1.SyncObjectPatch{},
 				ResourceApplyMode: hivev1.UpsertResourceApplyMode,
-				SecretReferences: []hivev1.SecretReference{
-					hivev1.SecretReference{
-						Source: corev1.ObjectReference{
+				Secrets: []hivev1.SecretMapping{
+					hivev1.SecretMapping{
+						SourceRef: hivev1.SecretReference{
 							Name:      bma.Spec.BMC.CredentialsName,
 							Namespace: bma.Namespace,
 						},
-						Target: corev1.ObjectReference{
+						TargetRef: hivev1.SecretReference{
 							Name:      bma.Spec.BMC.CredentialsName,
 							Namespace: bma.Namespace,
 						},
