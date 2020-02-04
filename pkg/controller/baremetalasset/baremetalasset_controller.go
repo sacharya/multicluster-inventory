@@ -315,7 +315,7 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *midasv1alpha1.BareMetalAss
 	hsc := &hivev1.SyncSet{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "SyncSet",
-			APIVersion: "hive.openshift.io/v1alpha1",
+			APIVersion: "hive.openshift.io/v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      bma.Name,
