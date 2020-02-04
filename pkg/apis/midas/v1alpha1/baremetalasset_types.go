@@ -6,6 +6,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// ManagedClusterResourceNamespace is the namespace on the managed cluster where BareMetalHosts are placed.
+const ManagedClusterResourceNamespace string = "openshift-machine-api"
+
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
@@ -84,6 +87,10 @@ const (
 	// ConditionAssetSyncStarted reports whether syncronization of a BareMetalHost
 	// to a managed cluster has started
 	ConditionAssetSyncStarted conditionsv1.ConditionType = "AssetSyncStarted"
+
+	// ConditionClusterDeploymentFound reports whether the cluster deployment referenced in
+	// a BareMetalAsset has been found.
+	ConditionClusterDeploymentFound conditionsv1.ConditionType = "ClusterDeploymentFound"
 )
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
