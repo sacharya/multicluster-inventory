@@ -80,6 +80,15 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 		return err
 	}
 
+	// Watch for changes to secondary resource ClusterDeployments and requeue the owner BareMetalAsset
+	err = c.Watch(&source.Kind{Type: &hivev1.ClusterDeployment{}}, &handler.EnqueueRequestForOwner{
+		IsController: true,
+		OwnerType:    &midasv1alpha1.BareMetalAsset{},
+	})
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
