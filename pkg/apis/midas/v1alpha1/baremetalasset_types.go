@@ -62,7 +62,7 @@ type BareMetalAssetSpec struct {
 
 // BareMetalAssetStatus defines the observed state of BareMetalAsset
 type BareMetalAssetStatus struct {
-	// Conditions describes the state of the HyperConverged resource.
+	// Conditions describes the state of the BareMetalAsset resource.
 	// +patchMergeKey=type
 	// +patchStrategy=merge
 	// +optional
