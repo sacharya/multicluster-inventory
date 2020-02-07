@@ -80,11 +80,36 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 		return err
 	}
 
-	// Watch for changes to secondary resource ClusterDeployments and requeue the owner BareMetalAsset
-	err = c.Watch(&source.Kind{Type: &hivev1.ClusterDeployment{}}, &handler.EnqueueRequestForOwner{
-		IsController: true,
-		OwnerType:    &midasv1alpha1.BareMetalAsset{},
-	})
+	// Watch for changes to ClusterDeployments and requeue BareMetalAssets with labels set to
+	// ClusterDeployment's name (which is expected to be the clusterName)
+	err = c.Watch(
+		&source.Kind{Type: &hivev1.ClusterDeployment{}},
+		&handler.EnqueueRequestsFromMapFunc{
+			ToRequests: handler.ToRequestsFunc(func(a handler.MapObject) []reconcile.Request {
+				clusterDeployment, ok := a.Object.(*hivev1.ClusterDeployment)
+				if !ok {
+					// not a Deployment, returning empty
+					log.Error(nil, "ClusterDeployment handler recieved non-ClusterDeployment object")
+					return []reconcile.Request{}
+				}
+				bmas := &midasv1alpha1.BareMetalAssetList{}
+				err := mgr.GetClient().List(context.TODO(), bmas, client.MatchingLabels{ClusterKey: clusterDeployment.Name})
+				if err != nil {
+					log.Error(err, "Could not list BareMetalAssets with label %v=%v", ClusterKey, clusterDeployment.Name)
+				}
+				var requests []reconcile.Request
+				for _, bma := range bmas.Items {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Name:      bma.Name,
+							Namespace: bma.Namespace,
+						},
+					})
+				}
+				return requests
+			}),
+		})
+
 	if err != nil {
 		return err
 	}
