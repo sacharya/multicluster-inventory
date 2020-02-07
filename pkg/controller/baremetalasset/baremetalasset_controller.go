@@ -80,6 +80,40 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 		return err
 	}
 
+	// Watch for changes to ClusterDeployments and requeue BareMetalAssets with labels set to
+	// ClusterDeployment's name (which is expected to be the clusterName)
+	err = c.Watch(
+		&source.Kind{Type: &hivev1.ClusterDeployment{}},
+		&handler.EnqueueRequestsFromMapFunc{
+			ToRequests: handler.ToRequestsFunc(func(a handler.MapObject) []reconcile.Request {
+				clusterDeployment, ok := a.Object.(*hivev1.ClusterDeployment)
+				if !ok {
+					// not a Deployment, returning empty
+					log.Error(nil, "ClusterDeployment handler recieved non-ClusterDeployment object")
+					return []reconcile.Request{}
+				}
+				bmas := &midasv1alpha1.BareMetalAssetList{}
+				err := mgr.GetClient().List(context.TODO(), bmas, client.MatchingLabels{ClusterKey: clusterDeployment.Name})
+				if err != nil {
+					log.Error(err, "Could not list BareMetalAssets with label %v=%v", ClusterKey, clusterDeployment.Name)
+				}
+				var requests []reconcile.Request
+				for _, bma := range bmas.Items {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Name:      bma.Name,
+							Namespace: bma.Namespace,
+						},
+					})
+				}
+				return requests
+			}),
+		})
+
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -165,7 +199,6 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 			reqLogger.Error(err, "Failed to update secret with OwnerReferences")
 			return reconcile.Result{}, err
 		}
-		return reconcile.Result{Requeue: true}, nil
 	}
 
 	// Update the cluster label from instance spec.clusterName
@@ -189,29 +222,72 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 	}
 
 	if instance.Spec.ClusterName != "" {
-		// If clusterName is specified, ensure syncset is created
-		err = r.ensureHiveSyncSet(instance, reqLogger)
+		// If clusterName is specified in the spec, we need to find the clusterdeployment for that clusterName and create
+		// hive syncset in the same namespace as the clusterdeployment.
+		clusterName := instance.Spec.ClusterName
+		foundCd := &hivev1.ClusterDeployment{}
+		err = r.client.Get(context.TODO(), types.NamespacedName{Name: clusterName, Namespace: clusterName}, foundCd)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				reqLogger.Error(err, "ClusterDeployment not found", "Namespace", clusterName, "ClusterDeployment", clusterName)
+				conditionsv1.SetStatusCondition(&instance.Status.Conditions, conditionsv1.Condition{
+					Type:    midasv1alpha1.ConditionClusterDeploymentFound,
+					Status:  corev1.ConditionFalse,
+					Reason:  "ClusterDeploymentNotFound",
+					Message: fmt.Sprintf("A cluster deployment with the name %v in namespace %v could not be found", clusterName, clusterName),
+				})
+				return reconcile.Result{}, r.client.Status().Update(context.TODO(), instance)
+			}
+			return reconcile.Result{}, err
+		}
+		conditionsv1.SetStatusCondition(&instance.Status.Conditions, conditionsv1.Condition{
+			Type:    midasv1alpha1.ConditionClusterDeploymentFound,
+			Status:  corev1.ConditionTrue,
+			Reason:  "ClusterDeploymentFound",
+			Message: fmt.Sprintf("A clusterdeployment with the name %v in namespace %v was found", clusterName, clusterName),
+		})
+		statusErr := r.client.Status().Update(context.TODO(), instance)
+		if statusErr != nil {
+			reqLogger.Error(statusErr, "Failed to update instance status")
+			return reconcile.Result{}, statusErr
+		}
+
+		// If clusterDeployment is found, ensure syncset is created
+		err = r.ensureHiveSyncSet(instance, foundCd, reqLogger)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
 	} else {
-		// if clusterName is not specified, delete the syncset if it exists
-		found := &hivev1.SyncSet{}
-		err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, found)
-		if err != nil {
-			if !errors.IsNotFound(err) {
-				reqLogger.Error(err, "Failed to get Hive SyncSet")
-				return reconcile.Result{}, err
-			}
-		} else {
-			err = r.client.Delete(context.TODO(), found)
-			if err != nil {
-				if !errors.IsNotFound(err) {
-					reqLogger.Error(err, "Failed to delete Hive SyncSet")
-					return reconcile.Result{}, err
-				}
+		// Without a clusterName, we do not know what namespace the syncset is in.
+		// Get the syncset from relatedobjects if it exists
+		hscRef := corev1.ObjectReference{}
+		for _, ro := range instance.Status.RelatedObjects {
+			if ro.Name == instance.Name && ro.Kind == "SyncSet" && ro.APIVersion == hivev1.SchemeGroupVersion.String() {
+				hscRef = ro
+				break
 			}
 		}
+		if hscRef == (corev1.ObjectReference{}) {
+			// No syncset found in relatedObjects. Nothing to do.
+			return reconcile.Result{}, nil
+		}
+		// If clusterName is not specified, delete the syncset if it exists
+		reqLogger.Info("Cleaning up Hive SyncSet", "Name", hscRef.Name, "Namespace", hscRef.Namespace)
+		err = r.client.Delete(context.TODO(), &hivev1.SyncSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: hscRef.Name,
+				Name:      hscRef.Namespace,
+			},
+		})
+		if err != nil {
+			if !errors.IsNotFound(err) {
+				reqLogger.Error(err, "Failed to delete Hive SyncSet")
+				return reconcile.Result{}, err
+			}
+		}
+		// Remove SyncSet from related objects
+		objectreferencesv1.RemoveObjectReference(&instance.Status.RelatedObjects, hscRef)
+		return reconcile.Result{}, r.client.Status().Update(context.TODO(), instance)
 	}
 
 	reqLogger.Info("Reconciled")
@@ -219,8 +295,8 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 	return reconcile.Result{}, nil
 }
 
-func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetalAsset, reqLogger logr.Logger) error {
-	hsc := r.newHiveSyncSet(bma, reqLogger)
+func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetalAsset, cd *hivev1.ClusterDeployment, reqLogger logr.Logger) error {
+	hsc := r.newHiveSyncSet(bma, cd, reqLogger)
 
 	found := &hivev1.SyncSet{}
 	err := r.client.Get(context.TODO(), types.NamespacedName{Name: hsc.Name, Namespace: hsc.Namespace}, found)
@@ -292,7 +368,7 @@ func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetal
 	}
 
 	// Add SyncSet to related objects
-	hscRef, err := reference.GetReference(r.scheme, hsc)
+	hscRef, err := reference.GetReference(r.scheme, found)
 	if err != nil {
 		reqLogger.Error(err, "Failed to get reference from SyncSet")
 		return err
@@ -302,7 +378,7 @@ func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetal
 	return r.client.Status().Update(context.TODO(), bma)
 }
 
-func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *midasv1alpha1.BareMetalAsset, reqLogger logr.Logger) *hivev1.SyncSet {
+func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *midasv1alpha1.BareMetalAsset, cd *hivev1.ClusterDeployment, reqLogger logr.Logger) *hivev1.SyncSet {
 	bmhResource, err := json.Marshal(r.newBareMetalHost(bma, reqLogger))
 	if err != nil {
 		reqLogger.Error(err, "Error marshaling baremetalhost")
@@ -315,11 +391,11 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *midasv1alpha1.BareMetalAss
 	hsc := &hivev1.SyncSet{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "SyncSet",
-			APIVersion: "hive.openshift.io/v1alpha1",
+			APIVersion: "hive.openshift.io/v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      bma.Name,
-			Namespace: bma.Namespace,
+			Namespace: cd.Namespace, // syncset should be created in the same namespace as the clusterdeployment
 			OwnerReferences: []metav1.OwnerReference{
 				metav1.OwnerReference{
 					UID:                bma.UID,
@@ -339,7 +415,7 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *midasv1alpha1.BareMetalAss
 					},
 				},
 				Patches:           []hivev1.SyncObjectPatch{},
-				ResourceApplyMode: hivev1.UpsertResourceApplyMode,
+				ResourceApplyMode: hivev1.SyncResourceApplyMode,
 				Secrets: []hivev1.SecretMapping{
 					hivev1.SecretMapping{
 						SourceRef: hivev1.SecretReference{
@@ -348,7 +424,7 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *midasv1alpha1.BareMetalAss
 						},
 						TargetRef: hivev1.SecretReference{
 							Name:      bma.Spec.BMC.CredentialsName,
-							Namespace: bma.Namespace,
+							Namespace: midasv1alpha1.ManagedClusterResourceNamespace,
 						},
 					},
 				},
@@ -373,7 +449,7 @@ func (r *ReconcileBareMetalAsset) newBareMetalHost(bma *midasv1alpha1.BareMetalA
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      bma.Name,
-			Namespace: bma.Namespace,
+			Namespace: midasv1alpha1.ManagedClusterResourceNamespace,
 		},
 		Spec: metal3v1alpha1.BareMetalHostSpec{
 			BMC: metal3v1alpha1.BMCDetails{
