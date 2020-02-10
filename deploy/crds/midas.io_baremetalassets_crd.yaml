@@ -51,9 +51,9 @@ spec:
                 types, but required for libvirt VMs driven by vbmc.
               pattern: '[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}'
               type: string
-            clusterName:
-              description: The name of the cluster which the host belongs to.
-              type: string
+            clusterDeployment:
+              description: ClusterDeployment which the asset belongs to.
+              type: object
             hardwareProfile:
               description: What is the name of the hardware profile for this host?
                 It should only be necessary to set this when inspection cannot automatically

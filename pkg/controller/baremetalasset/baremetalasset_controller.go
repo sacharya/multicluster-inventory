@@ -31,10 +31,12 @@ import (
 var log = logf.Log.WithName("controller_baremetalasset")
 
 const (
-	// RoleKey is the key name for the role label associated with the asset
-	RoleKey = "metal3.io/role"
-	// ClusterKey is the key name for the cluster label associated with the asset
-	ClusterKey = "metal3.io/cluster"
+	// RoleLabel is the key name for the role label associated with the asset
+	RoleLabel = "metal3.io/role"
+	// ClusterDeploymentNameLabel is the key name for the name label associated with the asset's clusterDeployment
+	ClusterDeploymentNameLabel = "metal3.io/cluster-deployment-name"
+	// ClusterDeploymentNamespaceLabel is the key name for the namespace label associated with the asset's clusterDeployment
+	ClusterDeploymentNamespaceLabel = "metal3.io/cluster-deployment-namespace"
 )
 
 // Add creates a new BareMetalAsset Controller and adds it to the Manager. The Manager will set fields on the Controller
@@ -93,9 +95,13 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 					return []reconcile.Request{}
 				}
 				bmas := &midasv1alpha1.BareMetalAssetList{}
-				err := mgr.GetClient().List(context.TODO(), bmas, client.MatchingLabels{ClusterKey: clusterDeployment.Name})
+				err := mgr.GetClient().List(context.TODO(), bmas,
+					client.MatchingLabels{
+						ClusterDeploymentNameLabel:      clusterDeployment.Name,
+						ClusterDeploymentNamespaceLabel: clusterDeployment.Namespace,
+					})
 				if err != nil {
-					log.Error(err, "Could not list BareMetalAssets with label %v=%v", ClusterKey, clusterDeployment.Name)
+					log.Error(err, "Could not list BareMetalAssets with label %v=%v", ClusterDeploymentNameLabel, clusterDeployment.Name)
 				}
 				var requests []reconcile.Request
 				for _, bma := range bmas.Items {
@@ -204,14 +210,17 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 	// Update the cluster label from instance spec.clusterName
 	// If not specified, removes the label.
 	updateLabels := false
-	if instance.Labels[ClusterKey] != instance.Spec.ClusterName {
-		setLabel(instance, ClusterKey, instance.Spec.ClusterName)
+	clusterName := instance.Spec.ClusterDeployment.Name
+	clusterNamespace := instance.Spec.ClusterDeployment.Namespace
+	if instance.Labels[ClusterDeploymentNameLabel] != clusterName {
+		setLabel(instance, ClusterDeploymentNameLabel, clusterName)
+		setLabel(instance, ClusterDeploymentNamespaceLabel, clusterNamespace)
 		updateLabels = true
 	}
 	// Update the role label from instance spec.role
 	// If not specified, removes the label
-	if instance.Labels[RoleKey] != fmt.Sprintf("%v", instance.Spec.Role) {
-		setLabel(instance, RoleKey, fmt.Sprintf("%v", instance.Spec.Role))
+	if instance.Labels[RoleLabel] != fmt.Sprintf("%v", instance.Spec.Role) {
+		setLabel(instance, RoleLabel, fmt.Sprintf("%v", instance.Spec.Role))
 		updateLabels = true
 	}
 	if updateLabels {
@@ -221,20 +230,19 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 		}
 	}
 
-	if instance.Spec.ClusterName != "" {
+	if clusterName != "" {
 		// If clusterName is specified in the spec, we need to find the clusterdeployment for that clusterName and create
 		// hive syncset in the same namespace as the clusterdeployment.
-		clusterName := instance.Spec.ClusterName
 		foundCd := &hivev1.ClusterDeployment{}
-		err = r.client.Get(context.TODO(), types.NamespacedName{Name: clusterName, Namespace: clusterName}, foundCd)
+		err = r.client.Get(context.TODO(), types.NamespacedName{Name: clusterName, Namespace: clusterNamespace}, foundCd)
 		if err != nil {
 			if errors.IsNotFound(err) {
-				reqLogger.Error(err, "ClusterDeployment not found", "Namespace", clusterName, "ClusterDeployment", clusterName)
+				reqLogger.Error(err, "ClusterDeployment not found", "Namespace", clusterNamespace, "ClusterDeployment", clusterName)
 				conditionsv1.SetStatusCondition(&instance.Status.Conditions, conditionsv1.Condition{
 					Type:    midasv1alpha1.ConditionClusterDeploymentFound,
 					Status:  corev1.ConditionFalse,
 					Reason:  "ClusterDeploymentNotFound",
-					Message: fmt.Sprintf("A cluster deployment with the name %v in namespace %v could not be found", clusterName, clusterName),
+					Message: fmt.Sprintf("A cluster deployment with the name %v in namespace %v could not be found", clusterName, clusterNamespace),
 				})
 				return reconcile.Result{}, r.client.Status().Update(context.TODO(), instance)
 			}
@@ -244,7 +252,7 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 			Type:    midasv1alpha1.ConditionClusterDeploymentFound,
 			Status:  corev1.ConditionTrue,
 			Reason:  "ClusterDeploymentFound",
-			Message: fmt.Sprintf("A clusterdeployment with the name %v in namespace %v was found", clusterName, clusterName),
+			Message: fmt.Sprintf("A clusterdeployment with the name %v in namespace %v was found", clusterName, clusterNamespace),
 		})
 		statusErr := r.client.Status().Update(context.TODO(), instance)
 		if statusErr != nil {
@@ -275,8 +283,8 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 		reqLogger.Info("Cleaning up Hive SyncSet", "Name", hscRef.Name, "Namespace", hscRef.Namespace)
 		err = r.client.Delete(context.TODO(), &hivev1.SyncSet{
 			ObjectMeta: metav1.ObjectMeta{
-				Namespace: hscRef.Name,
-				Name:      hscRef.Namespace,
+				Namespace: hscRef.Namespace,
+				Name:      hscRef.Name,
 			},
 		})
 		if err != nil {
@@ -333,13 +341,14 @@ func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetal
 	} else {
 		updateLabels := false
 		// Update Hive SyncSet cluster label if it is not in desired state
-		if found.Labels[ClusterKey] != bma.Spec.ClusterName {
-			setLabel(found, ClusterKey, bma.Spec.ClusterName)
+		if found.Labels[ClusterDeploymentNameLabel] != bma.Spec.ClusterDeployment.Name {
+			setLabel(found, ClusterDeploymentNameLabel, bma.Spec.ClusterDeployment.Name)
+			setLabel(found, ClusterDeploymentNamespaceLabel, bma.Spec.ClusterDeployment.Namespace)
 			updateLabels = true
 		}
 		// Update Hive SyncSet role label if it is not in desired state
-		if found.Labels[RoleKey] != fmt.Sprintf("%v", bma.Spec.Role) {
-			setLabel(found, RoleKey, fmt.Sprintf("%v", bma.Spec.Role))
+		if found.Labels[RoleLabel] != fmt.Sprintf("%v", bma.Spec.Role) {
+			setLabel(found, RoleLabel, fmt.Sprintf("%v", bma.Spec.Role))
 			updateLabels = true
 		}
 		if updateLabels {
@@ -431,13 +440,14 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *midasv1alpha1.BareMetalAss
 			},
 			ClusterDeploymentRefs: []corev1.LocalObjectReference{
 				{
-					Name: bma.Spec.ClusterName,
+					Name: bma.Spec.ClusterDeployment.Name,
 				},
 			},
 		},
 	}
-	setLabel(hsc, ClusterKey, bma.Spec.ClusterName)
-	setLabel(hsc, RoleKey, fmt.Sprintf("%v", bma.Spec.Role))
+	setLabel(hsc, ClusterDeploymentNameLabel, bma.Spec.ClusterDeployment.Name)
+	setLabel(hsc, ClusterDeploymentNamespaceLabel, bma.Spec.ClusterDeployment.Namespace)
+	setLabel(hsc, RoleLabel, fmt.Sprintf("%v", bma.Spec.Role))
 	return hsc
 }
 
@@ -460,8 +470,9 @@ func (r *ReconcileBareMetalAsset) newBareMetalHost(bma *midasv1alpha1.BareMetalA
 			BootMACAddress:  bma.Spec.BootMACAddress,
 		},
 	}
-	setLabel(bmh, ClusterKey, bma.Spec.ClusterName)
-	setLabel(bmh, RoleKey, fmt.Sprintf("%v", bma.Spec.Role))
+	setLabel(bmh, ClusterDeploymentNameLabel, bma.Spec.ClusterDeployment.Name)
+	setLabel(bmh, ClusterDeploymentNamespaceLabel, bma.Spec.ClusterDeployment.Namespace)
+	setLabel(bmh, RoleLabel, fmt.Sprintf("%v", bma.Spec.Role))
 	return bmh
 }
 
