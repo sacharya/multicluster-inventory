@@ -6,7 +6,7 @@ require (
 	github.com/go-logr/logr v0.1.0
 	github.com/metal3-io/baremetal-operator v0.0.0-20200120082342-77ca19fceb81
 	github.com/openshift/custom-resource-status v0.0.0-20190822192428-e62f2f3b79f3
-	github.com/openshift/hive v0.0.0-20200131173602-a876a2be0a9a
+	github.com/openshift/hive v0.0.0-20200205183908-5d26c05f298a
 	github.com/operator-framework/operator-sdk v0.14.0
 	github.com/spf13/pflag v1.0.5
 	k8s.io/api v0.0.0

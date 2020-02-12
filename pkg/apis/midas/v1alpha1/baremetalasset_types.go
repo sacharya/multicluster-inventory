@@ -91,6 +91,10 @@ const (
 	// ConditionClusterDeploymentFound reports whether the cluster deployment referenced in
 	// a BareMetalAsset has been found.
 	ConditionClusterDeploymentFound conditionsv1.ConditionType = "ClusterDeploymentFound"
+
+	// ConditionAssetSyncCompleted reports whether syncronization of a BareMetalHost
+	// to a managed cluster has completed
+	ConditionAssetSyncCompleted conditionsv1.ConditionType = "AssetSyncCompleted"
 )
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

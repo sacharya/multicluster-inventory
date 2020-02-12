@@ -12,6 +12,7 @@ import (
 	conditionsv1 "github.com/openshift/custom-resource-status/conditions/v1"
 	objectreferencesv1 "github.com/openshift/custom-resource-status/objectreferences/v1"
 	hivev1 "github.com/openshift/hive/pkg/apis/hive/v1"
+	hiveconstants "github.com/openshift/hive/pkg/constants"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,6 +38,8 @@ const (
 	ClusterDeploymentNameLabel = "metal3.io/cluster-deployment-name"
 	// ClusterDeploymentNamespaceLabel is the key name for the namespace label associated with the asset's clusterDeployment
 	ClusterDeploymentNamespaceLabel = "metal3.io/cluster-deployment-namespace"
+	// BareMetalHostKind contains the value of kind BareMetalHost
+	BareMetalHostKind = "BareMetalHost"
 )
 
 // Add creates a new BareMetalAsset Controller and adds it to the Manager. The Manager will set fields on the Controller
@@ -303,6 +306,111 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 	return reconcile.Result{}, nil
 }
 
+func (r *ReconcileBareMetalAsset) checkHiveSyncSetInstance(bma *midasv1alpha1.BareMetalAsset, reqLogger logr.Logger) error {
+	found := &hivev1.SyncSetInstanceList{}
+	err := r.client.List(context.TODO(), found, client.MatchingLabels{hiveconstants.SyncSetNameLabel: bma.Name})
+
+	if err != nil {
+		reqLogger.Error(err, "Problem getting Hive SyncSetInstanceList")
+		return err
+	}
+	switch len(found.Items) {
+	case 0:
+		err = fmt.Errorf("No SyncSetInstances with label name %v and label value %v found", hiveconstants.SyncSetNameLabel, bma.Name)
+		conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
+			Type:    midasv1alpha1.ConditionAssetSyncCompleted,
+			Status:  corev1.ConditionFalse,
+			Reason:  "SyncSetInstanceNotFound",
+			Message: err.Error(),
+		})
+		return err
+	case 1:
+		resourceCount := len(found.Items[0].Status.Resources)
+		if resourceCount != 1 {
+			err = fmt.Errorf("Unexpected number of resources found on SyncSetInstance status. Expected (%v) Found (%v)", 1, resourceCount)
+			conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
+				Type:    midasv1alpha1.ConditionAssetSyncCompleted,
+				Status:  corev1.ConditionFalse,
+				Reason:  "UnexpectedResourceCount",
+				Message: err.Error(),
+			})
+			return err
+		}
+		res := found.Items[0].Status.Resources[0]
+		if res.APIVersion != metal3v1alpha1.SchemeGroupVersion.String() || res.Kind != BareMetalHostKind {
+			err = fmt.Errorf("Unexpected resource found in SyncSetInstance status. Expected (Kind: %v APIVersion: %v) Found (Kind: %v APIVersion: %v)", BareMetalHostKind, metal3v1alpha1.SchemeGroupVersion.String(), res.Kind, res.APIVersion)
+			conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
+				Type:    midasv1alpha1.ConditionAssetSyncCompleted,
+				Status:  corev1.ConditionFalse,
+				Reason:  "BareMetalHostResourceNotFound",
+				Message: err.Error(),
+			})
+			return err
+		}
+		for _, condition := range res.Conditions {
+			switch condition.Type {
+			case hivev1.ApplySuccessSyncCondition:
+				conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
+					Type:    midasv1alpha1.ConditionAssetSyncCompleted,
+					Status:  condition.Status,
+					Reason:  condition.Reason,
+					Message: condition.Message,
+				})
+			case hivev1.ApplyFailureSyncCondition:
+				conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
+					Type:    midasv1alpha1.ConditionAssetSyncCompleted,
+					Status:  corev1.ConditionFalse,
+					Reason:  condition.Reason,
+					Message: condition.Message,
+				})
+				return fmt.Errorf("SyncSetInstance resource %v failed with message %v", res.Name, condition.Message)
+			}
+		}
+
+		secretsCount := len(found.Items[0].Status.Secrets)
+		if secretsCount != 1 {
+			err = fmt.Errorf("Unexpected number of secrets found on SyncSetInstance. Expected: (%v) Actual: (%v)", 1, secretsCount)
+			conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
+				Type:    midasv1alpha1.ConditionAssetSyncCompleted,
+				Status:  corev1.ConditionFalse,
+				Reason:  "UnexpectedSecretCount",
+				Message: err.Error(),
+			})
+			return err
+		}
+		secret := found.Items[0].Status.Secrets[0]
+		for _, condition := range secret.Conditions {
+			switch condition.Type {
+			case hivev1.ApplySuccessSyncCondition:
+				conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
+					Type:    midasv1alpha1.ConditionAssetSyncCompleted,
+					Status:  condition.Status,
+					Reason:  condition.Reason,
+					Message: condition.Message,
+				})
+			case hivev1.ApplyFailureSyncCondition:
+				conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
+					Type:    midasv1alpha1.ConditionAssetSyncCompleted,
+					Status:  corev1.ConditionFalse,
+					Reason:  condition.Reason,
+					Message: condition.Message,
+				})
+				return fmt.Errorf("SyncSetInstance resource %v failed with message %v", res.Name, condition.Message)
+			}
+		}
+	default:
+		err = fmt.Errorf("Found multiple Hive SyncSetInstances with same label")
+		conditionsv1.SetStatusCondition(&bma.Status.Conditions, conditionsv1.Condition{
+			Type:    midasv1alpha1.ConditionAssetSyncCompleted,
+			Status:  corev1.ConditionFalse,
+			Reason:  "MultipleSyncSetInstancesFound",
+			Message: err.Error(),
+		})
+		return err
+	}
+	return nil
+}
+
 func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetalAsset, cd *hivev1.ClusterDeployment, reqLogger logr.Logger) error {
 	hsc := r.newHiveSyncSet(bma, cd, reqLogger)
 
@@ -384,6 +492,15 @@ func (r *ReconcileBareMetalAsset) ensureHiveSyncSet(bma *midasv1alpha1.BareMetal
 	}
 	objectreferencesv1.SetObjectReference(&bma.Status.RelatedObjects, *hscRef)
 
+	err = r.checkHiveSyncSetInstance(bma, reqLogger)
+	if err != nil {
+		reqLogger.Error(err, "Failed to get asset sync update from Hive SyncSetInstance")
+		statusError := r.client.Status().Update(context.TODO(), bma)
+		if statusError != nil {
+			reqLogger.Error(statusError, "Error while updating status")
+		}
+		return err
+	}
 	return r.client.Status().Update(context.TODO(), bma)
 }
 
@@ -454,8 +571,8 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(bma *midasv1alpha1.BareMetalAss
 func (r *ReconcileBareMetalAsset) newBareMetalHost(bma *midasv1alpha1.BareMetalAsset, reqLogger logr.Logger) *metal3v1alpha1.BareMetalHost {
 	bmh := &metal3v1alpha1.BareMetalHost{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       "BareMetalHost",
-			APIVersion: "metal3.io/v1alpha1",
+			Kind:       BareMetalHostKind,
+			APIVersion: metal3v1alpha1.SchemeGroupVersion.String(),
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      bma.Name,
