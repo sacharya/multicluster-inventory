@@ -14,7 +14,7 @@ sanity: ## Check the sanity of the project
 	git diff --exit-code
 
 build: ## Build binary from source
-	go build -i ./cmd/manager/main.go
+	go build -i -o build/_output/bin/multicluster-inventory ./cmd/manager/main.go
 
 test: ## Unit test the project
 	go test -v ./...
