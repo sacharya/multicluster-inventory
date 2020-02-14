@@ -41,7 +41,7 @@ podman push quay.io/$REGISTRY_NAMESPACE/multicluster-inventory:$TAG
 Once the image is pushed, edit the deploy/operator.yaml to point to your image.
 ```
 MCINVENTORY_IMAGE="quay.io/$REGISTRY_NAMESPACE/multicluster-inventory:$TAG"
-sed -i "s|REPLACE|$MCINVENTORY_IMAGE" ./deploy/operator.yaml
+sed -i "s|REPLACE_IMAGE|$MCINVENTORY_IMAGE|" ./deploy/operator.yaml
 ```
 
 Deploy the operator:
