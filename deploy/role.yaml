@@ -59,6 +59,14 @@ rules:
 - apiGroups:
   - hive.openshift.io
   resources:
+  - syncsetinstances
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - hive.openshift.io
+  resources:
   - clusterdeployments
   verbs:
   - get
