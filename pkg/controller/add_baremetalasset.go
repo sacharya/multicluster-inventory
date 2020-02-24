@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"github.com/mhrivnak/multicluster-inventory/pkg/controller/baremetalasset"
+	"github.com/open-cluster-management/multicluster-inventory/pkg/controller/baremetalasset"
 )
 
 func init() {

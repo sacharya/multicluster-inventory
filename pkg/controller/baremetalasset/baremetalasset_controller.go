@@ -9,8 +9,8 @@ import (
 
 	"github.com/go-logr/logr"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/pkg/apis/metal3/v1alpha1"
-	midasv1alpha1 "github.com/mhrivnak/multicluster-inventory/pkg/apis/midas/v1alpha1"
-	bmaerrors "github.com/mhrivnak/multicluster-inventory/pkg/errors"
+	midasv1alpha1 "github.com/open-cluster-management/multicluster-inventory/pkg/apis/midas/v1alpha1"
+	bmaerrors "github.com/open-cluster-management/multicluster-inventory/pkg/errors"
 	conditionsv1 "github.com/openshift/custom-resource-status/conditions/v1"
 	objectreferencesv1 "github.com/openshift/custom-resource-status/objectreferences/v1"
 	hivev1 "github.com/openshift/hive/pkg/apis/hive/v1"

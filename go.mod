@@ -1,4 +1,4 @@
-module github.com/mhrivnak/multicluster-inventory
+module github.com/open-cluster-management/multicluster-inventory
 
 go 1.13
 
