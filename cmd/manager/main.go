@@ -12,9 +12,9 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
 
-	"github.com/mhrivnak/multicluster-inventory/pkg/apis"
-	"github.com/mhrivnak/multicluster-inventory/pkg/controller"
-	"github.com/mhrivnak/multicluster-inventory/version"
+	"github.com/open-cluster-management/multicluster-inventory/pkg/apis"
+	"github.com/open-cluster-management/multicluster-inventory/pkg/controller"
+	"github.com/open-cluster-management/multicluster-inventory/version"
 
 	hivev1 "github.com/openshift/hive/pkg/apis/hive/v1"
 	"github.com/operator-framework/operator-sdk/pkg/k8sutil"

@@ -1,7 +1,7 @@
 package apis
 
 import (
-	"github.com/mhrivnak/multicluster-inventory/pkg/apis/midas/v1alpha1"
+	"github.com/open-cluster-management/multicluster-inventory/pkg/apis/midas/v1alpha1"
 )
 
 func init() {
