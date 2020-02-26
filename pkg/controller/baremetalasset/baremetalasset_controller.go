@@ -43,6 +43,8 @@ const (
 	ClusterDeploymentNamespaceLabel = "metal3.io/cluster-deployment-namespace"
 	// BareMetalHostKind contains the value of kind BareMetalHost
 	BareMetalHostKind = "BareMetalHost"
+	// BareMetalAssetFinalizer is the finalizer used on BareMetalAsset resource
+	BareMetalAssetFinalizer = "baremetalasset.midas.io"
 )
 
 const (
@@ -84,11 +86,40 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 		return err
 	}
 
-	// Watch for changes to secondary resource SyncSets and requeue the owner BareMetalAsset
-	err = c.Watch(&source.Kind{Type: &hivev1.SyncSet{}}, &handler.EnqueueRequestForOwner{
-		IsController: true,
-		OwnerType:    &midasv1alpha1.BareMetalAsset{},
-	})
+	// Watch for changes to SyncSets and requeue BareMetalAssets with the name and matching cluster-deployment-namespace label
+	// (which is also the syncset namespace)
+	err = c.Watch(
+		&source.Kind{Type: &hivev1.SyncSet{}},
+		&handler.EnqueueRequestsFromMapFunc{
+			ToRequests: handler.ToRequestsFunc(func(a handler.MapObject) []reconcile.Request {
+				syncSet, ok := a.Object.(*hivev1.SyncSet)
+				if !ok {
+					// not a SyncSet, returning empty
+					log.Error(nil, "SyncSet handler recieved non-SyncSet object")
+					return []reconcile.Request{}
+				}
+				bmas := &midasv1alpha1.BareMetalAssetList{}
+				err := mgr.GetClient().List(context.TODO(), bmas,
+					client.MatchingFields{"metadata.name": syncSet.Name},
+					client.MatchingLabels{
+						ClusterDeploymentNamespaceLabel: syncSet.Namespace,
+					})
+				if err != nil {
+					log.Error(err, "Could not list BareMetalAsset %v with label %v=%v", syncSet.Name, ClusterDeploymentNamespaceLabel, syncSet.Namespace)
+				}
+				var requests []reconcile.Request
+				for _, bma := range bmas.Items {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Name:      bma.Name,
+							Namespace: bma.Namespace,
+						},
+					})
+				}
+				return requests
+			}),
+		})
+
 	if err != nil {
 		return err
 	}
@@ -165,6 +196,33 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 		}
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
+	}
+
+	// Check DeletionTimestamp to determine if object is under deletion
+	if instance.GetDeletionTimestamp().IsZero() {
+		if !contains(instance.GetFinalizers(), BareMetalAssetFinalizer) {
+			reqLogger.Info("Finalizer not found for BareMetalAsset. Adding finalizer")
+			instance.ObjectMeta.Finalizers = append(instance.ObjectMeta.Finalizers, BareMetalAssetFinalizer)
+			if err := r.client.Update(context.TODO(), instance); err != nil {
+				reqLogger.Error(err, "Failed to add finalizer to baremetalasset")
+				return reconcile.Result{}, err
+			}
+		}
+	} else {
+		// The object is being deleted
+		if contains(instance.GetFinalizers(), BareMetalAssetFinalizer) {
+			err := r.deleteSyncSet(instance, reqLogger)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+			reqLogger.Info("Removing Finalizer")
+			instance.ObjectMeta.Finalizers = remove(instance.ObjectMeta.Finalizers, BareMetalAssetFinalizer)
+			if err := r.client.Update(context.TODO(), instance); err != nil {
+				reqLogger.Error(err, "Failed to remove finalizer from baremetalasset")
+				return reconcile.Result{}, err
+			}
+		}
+		return reconcile.Result{}, nil
 	}
 
 	for _, f := range []func(*midasv1alpha1.BareMetalAsset, logr.Logger) error{
@@ -423,9 +481,6 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(instance *midasv1alpha1.BareMet
 		return nil
 	}
 
-	blockOwnerDeletion := true
-	isController := true
-
 	hsc := &hivev1.SyncSet{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "SyncSet",
@@ -434,16 +489,6 @@ func (r *ReconcileBareMetalAsset) newHiveSyncSet(instance *midasv1alpha1.BareMet
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name,
 			Namespace: instance.Spec.ClusterDeployment.Namespace, // syncset should be created in the same namespace as the clusterdeployment
-			OwnerReferences: []metav1.OwnerReference{
-				metav1.OwnerReference{
-					UID:                instance.UID,
-					APIVersion:         instance.APIVersion,
-					Kind:               instance.Kind,
-					Name:               instance.Name,
-					BlockOwnerDeletion: &blockOwnerDeletion,
-					Controller:         &isController,
-				},
-			},
 			Labels: map[string]string{
 				ClusterDeploymentNameLabel:      instance.Spec.ClusterDeployment.Name,
 				ClusterDeploymentNamespaceLabel: instance.Spec.ClusterDeployment.Namespace,
@@ -613,4 +658,44 @@ func (r *ReconcileBareMetalAsset) checkHiveSyncSetInstance(instance *midasv1alph
 		return err
 	}
 	return nil
+}
+
+func (r *ReconcileBareMetalAsset) deleteSyncSet(instance *midasv1alpha1.BareMetalAsset, reqLogger logr.Logger) error {
+	if instance.Spec.ClusterDeployment.Namespace == "" {
+		return nil
+	}
+	err := r.client.Delete(context.TODO(), &hivev1.SyncSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      instance.Name,
+			Namespace: instance.Spec.ClusterDeployment.Namespace,
+		},
+	})
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			reqLogger.Error(err, "Failed to delete Hive SyncSet")
+			return err
+		}
+	}
+	return nil
+}
+
+// Checks whether a string is contained within a slice
+func contains(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+// Removes a given string from a slice and returns the new slice
+func remove(slice []string, s string) (result []string) {
+	for _, item := range slice {
+		if item == s {
+			continue
+		}
+		result = append(result, item)
+	}
+	return
 }
