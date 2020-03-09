@@ -8,6 +8,7 @@ ifeq ($(IMAGE_BUILD_CMD),)
 endif
 
 sanity: ## Check the sanity of the project
+	go get -u golang.org/x/lint/golint
 	golint ./...
 	go mod tidy
 	go vet ./...
