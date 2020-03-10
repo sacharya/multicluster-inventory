@@ -228,6 +228,7 @@ func (r *ReconcileBareMetalAsset) Reconcile(request reconcile.Request) (reconcil
 	for _, f := range []func(*midasv1alpha1.BareMetalAsset, logr.Logger) error{
 		r.checkAssetSecret,
 		r.ensureLabels,
+		r.cleanupOldHiveSyncSet,
 		r.checkClusterDeployment,
 		r.ensureHiveSyncSet,
 		r.checkHiveSyncSetInstance,
@@ -337,37 +338,6 @@ func (r *ReconcileBareMetalAsset) checkClusterDeployment(instance *midasv1alpha1
 		conditionsv1.RemoveStatusCondition(&instance.Status.Conditions, midasv1alpha1.ConditionAssetSyncStarted)
 		conditionsv1.RemoveStatusCondition(&instance.Status.Conditions, midasv1alpha1.ConditionAssetSyncCompleted)
 
-		// Without a clusterName, we do not know what namespace the syncset is in.
-		// Get the syncset from relatedobjects if it exists
-		hscRef := corev1.ObjectReference{}
-		for _, ro := range instance.Status.RelatedObjects {
-			if ro.Name == instance.Name && ro.Kind == "SyncSet" && ro.APIVersion == hivev1.SchemeGroupVersion.String() {
-				hscRef = ro
-				break
-			}
-		}
-		if hscRef == (corev1.ObjectReference{}) {
-			// No syncset found in relatedObjects. Nothing to do.
-			return bmaerrors.NewNoClusterError()
-		}
-
-		// If clusterName is not specified, delete the syncset if it exists
-		reqLogger.Info("Cleaning up Hive SyncSet", "SyncSet.Name", hscRef.Name, "SyncSet.Namespace", hscRef.Namespace)
-		err := r.client.Delete(context.TODO(), &hivev1.SyncSet{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: hscRef.Namespace,
-				Name:      hscRef.Name,
-			},
-		})
-		if err != nil {
-			if !errors.IsNotFound(err) {
-				reqLogger.Error(err, "Failed to delete Hive SyncSet")
-				return err
-			}
-		}
-
-		// Remove SyncSet from related objects
-		objectreferencesv1.RemoveObjectReference(&instance.Status.RelatedObjects, hscRef)
 		return bmaerrors.NewNoClusterError()
 	}
 
@@ -676,6 +646,66 @@ func (r *ReconcileBareMetalAsset) deleteSyncSet(instance *midasv1alpha1.BareMeta
 			return err
 		}
 	}
+	return nil
+}
+
+func (r *ReconcileBareMetalAsset) cleanupOldHiveSyncSet(instance *midasv1alpha1.BareMetalAsset, reqLogger logr.Logger) error {
+	// If clusterDeployment.Namespace is updated to a new namespace or removed from the spec, we need to
+	// ensure that existing syncset, if any, is deleted from the old namespace.
+	// We can get the old syncset from relatedobjects if it exists.
+	hscRef := corev1.ObjectReference{}
+	for _, ro := range instance.Status.RelatedObjects {
+		if ro.Name == instance.Name &&
+			ro.Kind == "SyncSet" &&
+			ro.APIVersion == hivev1.SchemeGroupVersion.String() &&
+			ro.Namespace != instance.Spec.ClusterDeployment.Namespace {
+
+			hscRef = ro
+			break
+		}
+	}
+	if hscRef == (corev1.ObjectReference{}) {
+		// Nothing to do if no such syncset was found
+		return nil
+	}
+
+	// Delete syncset in old namespace
+	reqLogger.Info("Cleaning up Hive SyncSet in old namespace", "SyncSet.Name", hscRef.Name, "SyncSet.Namespace", hscRef.Namespace)
+	err := r.client.Delete(context.TODO(), &hivev1.SyncSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: hscRef.Namespace,
+			Name:      hscRef.Name,
+		},
+	})
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			reqLogger.Error(err, "Failed to delete Hive SyncSet", "SyncSet.Name", hscRef.Name, "SyncSet.Namespace", hscRef.Namespace)
+			return err
+		}
+	}
+
+	found := &hivev1.SyncSetInstanceList{}
+	err = r.client.List(context.TODO(),
+		found,
+		client.InNamespace(hscRef.Namespace),
+		client.MatchingLabels{hiveconstants.SyncSetNameLabel: hscRef.Name})
+	if err != nil {
+		reqLogger.Error(err, "Problem getting Hive SyncSetInstanceList", "Label.Key", hiveconstants.SyncSetNameLabel, "Label.Value", hscRef.Name)
+		return err
+	}
+
+	if len(found.Items) > 0 {
+		err = fmt.Errorf("Found SyncSetInstances in namespace: %v with label %v:%v. Expected: (%v) Actual: (%v)", hscRef.Namespace, hiveconstants.SyncSetNameLabel, hscRef.Name, 0, len(found.Items))
+		return err
+	}
+
+	// Remove SyncSet from related objects
+	err = objectreferencesv1.RemoveObjectReference(&instance.Status.RelatedObjects, hscRef)
+	if err != nil {
+		reqLogger.Error(err, "Failed to remove SyncSet from status.RelatedObjects")
+		return err
+	}
+
 	return nil
 }
 
