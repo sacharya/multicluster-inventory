@@ -9,6 +9,7 @@ require (
 	github.com/openshift/hive v0.0.0-20200205183908-5d26c05f298a
 	github.com/operator-framework/operator-sdk v0.14.0
 	github.com/spf13/pflag v1.0.5
+	github.com/stretchr/testify v1.4.0
 	golang.org/x/net v0.0.0-20200226121028-0de0cce0169b // indirect
 	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543 // indirect
 	k8s.io/api v0.0.0
