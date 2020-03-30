@@ -170,7 +170,7 @@ var _ reconcile.Reconciler = &ReconcileBareMetalAsset{}
 
 // ReconcileBareMetalAsset reconciles a BareMetalAsset object
 type ReconcileBareMetalAsset struct {
-	// This client, initialized using mgr.Client() above, is a split client
+	// This client, initialized using mgr.GetClient() above, is a split client
 	// that reads objects from the cache and writes to the apiserver
 	client client.Client
 	scheme *runtime.Scheme
@@ -615,7 +615,7 @@ func (r *ReconcileBareMetalAsset) checkHiveSyncSetInstance(instance *midasv1alph
 					Reason:  condition.Reason,
 					Message: condition.Message,
 				})
-				return fmt.Errorf("SyncSetInstance resource %v failed with message %v", res.Name, condition.Message)
+				return fmt.Errorf("SyncSetInstance resource %v failed with message %v", secret.Name, condition.Message)
 			}
 		}
 	default:
